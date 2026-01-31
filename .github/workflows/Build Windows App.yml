@@ -19,6 +19,8 @@ jobs:
       - name: Install Flutter SDK
         uses: subosito/flutter-action@v2
         with:
+          # استخدام إصدار مستقر ومحدد لتجنب أخطاء Dart SDK الحديثة
+          flutter-version: '3.24.0' 
           channel: 'stable'
 
       - name: Install Flet
@@ -29,17 +31,18 @@ jobs:
       - name: Enable Windows Desktop Support
         run: |
           flutter config --enable-windows-desktop
+          flutter doctor # للتأكد من جاهزية البيئة
 
       - name: Build Windows App
         env:
           PYTHONUTF8: 1
         run: |
-          # تأكد أنك في المجلد الصحيح الذي يحتوي على main.py
-          flet build windows
+          # نستخدم أمر البناء مع تجاهل الـ build hooks إذا كانت تسبب مشاكل في المكتبات الخارجية
+          flet build windows --verbose
 
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Flet-Windows-App
-          # المسار الناتج لعملية بناء Flutter على ويندوز
-          path: build/windows/x64/runner/Release/
+          name: Windows-App-Bundle
+          # هذا المسار هو المسار القياسي الذي ينتج عن flet build
+          path: build/windows/
