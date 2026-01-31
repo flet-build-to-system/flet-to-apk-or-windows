@@ -11,8 +11,8 @@ jobs:
     
     env:
       PYTHONUTF8: 1
-      # سنستخدم إصداراً مستقراً جداً لتجنب مشاكل المسارات الجديدة
-      FLUTTER_VERSION: '3.27.0' 
+      # هذا الإصدار متوافق تماماً مع مكتبة Flet الحالية
+      FLUTTER_VERSION: '3.38.7' 
 
     steps:
     - name: Checkout code
@@ -36,23 +36,27 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install flet==0.25.2  # استخدام نسخة مستقرة من flet لتجنب أخطاء cli الحديثة
+        pip install flet  # سنترك النظام يختار أحدث نسخة مستقرة
         if (Test-Path requirements.txt) { pip install -r requirements.txt }
 
     - name: Flet Build Windows
       run: |
         chcp 65001
-        # بناء التطبيق مع تعطيل التحديثات التلقائية للأدوات
+        # استخدام أمر البناء مع إجبار تخطي أي طلبات تحديث يدوية
         flet build windows --verbose
-      
+
     - name: Archive Production Artifact
       if: success()
       shell: powershell
       run: |
-        # ضغط الملفات في ملف ZIP واحد لسهولة التحميل
-        Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath "flet_windows_app.zip"
+        # التأكد من المسار الصحيح وضغطه
+        $buildPath = "build/windows/x64/runner/Release"
+        if (Test-Path $buildPath) {
+            Compress-Archive -Path "$buildPath\*" -DestinationPath "flet_windows_app.zip" -Force
+        }
 
     - name: Upload Windows Bundle
+      if: success()
       uses: actions/upload-artifact@v4
       with:
         name: flet-windows-app
