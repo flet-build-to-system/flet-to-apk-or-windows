@@ -11,7 +11,6 @@ env:
   BUILD_NUMBER: 1
   BUILD_VERSION: 1.0.0
   PYTHON_VERSION: '3.12.4'
-  # 更新为 Flet CLI 0.80.5 所需的 Flutter 版本
   FLUTTER_VERSION: '3.38.7'
 
 jobs:
@@ -34,65 +33,116 @@ jobs:
     - name: Install Python Dependencies
       run: |
         python -m pip install --upgrade pip
+        # 先安装 wheel 以避免构建问题
+        pip install wheel
         pip install -r requirements.txt
-        # 确保安装最新版本的 flet
-        pip install --upgrade flet
+        # 安装特定版本的 Flet CLI 以避免已知 bug
+        pip install flet==0.80.4
 
     - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
       uses: subosito/flutter-action@v2
       with:
         flutter-version: ${{ env.FLUTTER_VERSION }}
-        # 禁用 Flutter 自动升级提示
         flutter-args: "--no-version-check"
-        # 预先同意 Flutter 分析
         analytics: false
 
-    - name: Verify Tools Version
+    - name: 修复 Dart 路径问题
       run: |
-        python --version
-        pip show flet
-        flutter --version
+        # 检查并修复 Dart 可执行文件的路径问题
+        echo "当前 Flutter 安装路径:"
+        where flutter
+        
+        echo "检查 Dart 可执行文件:"
+        $flutterPath = "C:\hostedtoolcache\windows\flutter\stable-3.38.7-x64\bin\cache\dart-sdk\bin"
+        if (Test-Path "$flutterPath\dart.EXE") {
+          echo "Dart 可执行文件存在: $flutterPath\dart.EXE"
+          # 创建一个正确的 dart 命令副本，避免重复扩展名问题
+          Copy-Item "$flutterPath\dart.EXE" "$flutterPath\dart_no_ext" -Force
+        } else {
+          echo "警告: 找不到 dart.EXE"
+        }
+        
+        # 验证 Flutter 环境
+        flutter doctor -v
+
+    - name: 清理构建缓存
+      run: |
+        # 清理之前的构建缓存
+        if (Test-Path "build") {
+          Remove-Item -Recurse -Force build
+        }
+        # 清理 Flutter 缓存
+        flutter clean
 
     - name: Flet Build Windows
       env:
-        # 解决编码问题的环境变量
         PYTHONIOENCODING: UTF-8
         PYTHONUTF8: 1
-        # 防止交互式提示
-        FLET_CLI_NON_INTERACTIVE: 1
-        # 禁用 Flet CLI 的动画效果
-        FLET_CLI_NO_ANIMATIONS: 1
+        # 关键：使用更严格的环境变量避免交互
+        FLET_CLI_NON_INTERACTIVE: "true"
+        FLET_CLI_NO_ANIMATIONS: "true"
+        # 设置系统环境变量
+        CI: "true"
+        DEBIAN_FRONTEND: "noninteractive"
       run: |
-        # 设置 Windows 控制台编码
+        # 设置编码
         chcp 65001
         
-        # 预先配置 Flutter 避免交互式提示
-        flutter config --no-analytics --no-cli-animations
+        # 配置 Flutter 避免所有交互
+        flutter config --no-analytics --no-cli-animations --suppress-analytics
         
-        # 使用非交互模式构建
-        echo "开始构建 Windows 应用 (非交互模式)..."
-        flet build windows --verbose --no-rich-output --build-number=$env:BUILD_NUMBER --build-version=$env:BUILD_VERSION
+        echo "=== 开始 Windows 构建 ==="
+        echo "Python 版本:"
+        python --version
+        echo "Flet 版本:"
+        pip show flet
+        echo "Flutter 版本:"
+        flutter --version
+        
+        # 使用最小化输出构建
+        flet build windows --build-number=$env:BUILD_NUMBER --build-version=$env:BUILD_VERSION --verbose
         
         # 验证构建输出
-        if (Test-Path -Path "build\windows\runner\Release") {
+        echo "=== 验证构建结果 ==="
+        $buildDir = "build\windows\runner\Release"
+        if (Test-Path -Path $buildDir) {
           echo "✅ 构建成功！"
-          echo "输出目录: build\windows\runner\Release"
-          echo "生成的文件:"
-          Get-ChildItem -Path "build\windows\runner\Release" -File | ForEach-Object {
-            echo "  - $($_.Name) ($($_.Length) bytes)"
+          echo "输出目录: $buildDir"
+          $files = Get-ChildItem -Path $buildDir -File -Recurse
+          echo "生成 $($files.Count) 个文件:"
+          $files | ForEach-Object {
+            echo "  - $($_.FullName.Substring($pwd.Path.Length + 1)) ($($_.Length) bytes)"
           }
-        } else {
-          echo "⚠️  警告: 未找到预期的构建输出目录"
-          # 检查其他可能的位置
-          echo "当前目录内容:"
-          Get-ChildItem -Recurse -Depth 2 | Select-Object -First 20 FullName
+        else {
+          echo "❌ 构建失败 - 未找到输出目录"
+          echo "检查 build 目录内容:"
+          Get-ChildItem -Path "build" -Recurse | Select-Object -First 30 FullName
           exit 1
         }
 
     - name: Upload Windows Artifact
+      if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: windows-build-artifact
-        path: build/windows
-        if-no-files-found: warn
+        name: windows-app
+        path: |
+          build/windows/runner/Release/*.exe
+          build/windows/runner/Release/*.dll
+        if-no-files-found: error
+        retention-days: 7
+
+    - name: 创建 ZIP 包
+      if: success()
+      run: |
+        # 创建包含所有依赖的完整 ZIP 包
+        Compress-Archive -Path "build\windows\runner\Release\*" -DestinationPath "build\windows_app.zip" -Force
+        echo "ZIP 包大小:"
+        (Get-Item "build\windows_app.zip").Length
+
+    - name: Upload ZIP Artifact
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-app-zip
+        path: build/windows_app.zip
         retention-days: 7
