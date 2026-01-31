@@ -1,63 +1,36 @@
-name: Build Windows App
-
+name: Build Flet Windows App
 on:
   push:
-    branches: [ master, main ]
-  workflow_dispatch:
+    branches: [ main ] # سيتم التشغيل عند الدفع لفرع main
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
-    
-    env:
-      PYTHONUTF8: 1
-      # هذا الإصدار متوافق تماماً مع مكتبة Flet الحالية
-      FLUTTER_VERSION: '3.38.7' 
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Setup Python
-      uses: actions/setup-python@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.12'
+        python-version: '3.10'
 
-    - name: Setup Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        flutter-version: ${{ env.FLUTTER_VERSION }}
-        channel: 'stable'
-        cache: true
-
-    - name: Enable Windows Desktop
-      run: flutter config --enable-windows-desktop
-
-    - name: Install Dependencies
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install flet  # سنترك النظام يختار أحدث نسخة مستقرة
-        if (Test-Path requirements.txt) { pip install -r requirements.txt }
+        pip install -r requirements.txt
+        pip install flet # للتأكد من وجود أداة flet pack
 
-    - name: Flet Build Windows
+    - name: Build Windows Executable
       run: |
-        chcp 65001
-        # استخدام أمر البناء مع إجبار تخطي أي طلبات تحديث يدوية
-        flet build windows --verbose
+        # استبدل main.py باسم ملف التشغيل الأساسي لديك
+        flet pack main.py --name "MyFletApp"
 
-    - name: Archive Production Artifact
-      if: success()
-      shell: powershell
-      run: |
-        # التأكد من المسار الصحيح وضغطه
-        $buildPath = "build/windows/x64/runner/Release"
-        if (Test-Path $buildPath) {
-            Compress-Archive -Path "$buildPath\*" -DestinationPath "flet_windows_app.zip" -Force
-        }
-
-    - name: Upload Windows Bundle
-      if: success()
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: flet-windows-app
-        path: flet_windows_app.zip
+        name: Windows-App
+        path: dist/*.exe
