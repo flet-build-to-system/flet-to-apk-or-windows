@@ -33,10 +33,9 @@ jobs:
     - name: Install Python Dependencies
       run: |
         python -m pip install --upgrade pip
-        # 先安装 wheel 以避免构建问题
         pip install wheel
         pip install -r requirements.txt
-        # 安装特定版本的 Flet CLI 以避免已知 bug
+        # 安装 Flet 0.80.4 避免已知问题
         pip install flet==0.80.4
 
     - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
@@ -46,103 +45,142 @@ jobs:
         flutter-args: "--no-version-check"
         analytics: false
 
-    - name: 修复 Dart 路径问题
+    - name: 验证 Flutter 环境
       run: |
-        # 检查并修复 Dart 可执行文件的路径问题
-        echo "当前 Flutter 安装路径:"
-        where flutter
-        
-        echo "检查 Dart 可执行文件:"
-        $flutterPath = "C:\hostedtoolcache\windows\flutter\stable-3.38.7-x64\bin\cache\dart-sdk\bin"
-        if (Test-Path "$flutterPath\dart.EXE") {
-          echo "Dart 可执行文件存在: $flutterPath\dart.EXE"
-          # 创建一个正确的 dart 命令副本，避免重复扩展名问题
-          Copy-Item "$flutterPath\dart.EXE" "$flutterPath\dart_no_ext" -Force
-        } else {
-          echo "警告: 找不到 dart.EXE"
-        }
-        
-        # 验证 Flutter 环境
-        flutter doctor -v
+        echo "Flutter 版本:"
+        flutter --version
+        echo "Dart 版本:"
+        dart --version
+        echo "Flutter 医生检查:"
+        flutter doctor
 
-    - name: 清理构建缓存
+    - name: 清理之前的构建
       run: |
-        # 清理之前的构建缓存
+        # 清理之前的构建目录
         if (Test-Path "build") {
+          echo "清理旧的构建目录..."
           Remove-Item -Recurse -Force build
         }
-        # 清理 Flutter 缓存
-        flutter clean
+        # 清理 Python 缓存
+        if (Test-Path "__pycache__") {
+          Remove-Item -Recurse -Force __pycache__
+        }
+        if (Test-Path "*.pyc") {
+          Remove-Item -Force *.pyc
+        }
 
     - name: Flet Build Windows
       env:
         PYTHONIOENCODING: UTF-8
         PYTHONUTF8: 1
-        # 关键：使用更严格的环境变量避免交互
         FLET_CLI_NON_INTERACTIVE: "true"
         FLET_CLI_NO_ANIMATIONS: "true"
-        # 设置系统环境变量
         CI: "true"
-        DEBIAN_FRONTEND: "noninteractive"
       run: |
-        # 设置编码
+        # 设置控制台编码
         chcp 65001
         
-        # 配置 Flutter 避免所有交互
+        # 配置 Flutter 避免交互
         flutter config --no-analytics --no-cli-animations --suppress-analytics
         
         echo "=== 开始 Windows 构建 ==="
+        echo "工作目录: $(Get-Location)"
         echo "Python 版本:"
         python --version
         echo "Flet 版本:"
-        pip show flet
-        echo "Flutter 版本:"
-        flutter --version
+        pip show flet | Select-String "Version"
         
-        # 使用最小化输出构建
+        # 执行构建命令
         flet build windows --build-number=$env:BUILD_NUMBER --build-version=$env:BUILD_VERSION --verbose
         
-        # 验证构建输出
-        echo "=== 验证构建结果 ==="
-        $buildDir = "build\windows\runner\Release"
-        if (Test-Path -Path $buildDir) {
-          echo "✅ 构建成功！"
-          echo "输出目录: $buildDir"
-          $files = Get-ChildItem -Path $buildDir -File -Recurse
-          echo "生成 $($files.Count) 个文件:"
-          $files | ForEach-Object {
-            echo "  - $($_.FullName.Substring($pwd.Path.Length + 1)) ($($_.Length) bytes)"
+        # 检查构建结果
+        echo "=== 检查构建输出 ==="
+        
+        # 方法1：检查标准的 Windows 构建目录
+        $winBuildDir = "build\windows"
+        if (Test-Path -Path $winBuildDir) {
+          echo "✅ 找到 Windows 构建目录: $winBuildDir"
+          
+          # 查找可能的输出文件
+          $exeFiles = Get-ChildItem -Path $winBuildDir -Filter "*.exe" -Recurse -File
+          if ($exeFiles.Count -gt 0) {
+            echo "✅ 找到 $($exeFiles.Count) 个 EXE 文件"
+            $exeFiles | ForEach-Object {
+              echo "  - $($_.FullName.Substring($pwd.Path.Length + 1))"
+            }
+          } else {
+            echo "⚠️  未找到 EXE 文件，检查其他文件..."
+            Get-ChildItem -Path $winBuildDir -Recurse -Directory | Select-Object -First 5 FullName
           }
-        else {
-          echo "❌ 构建失败 - 未找到输出目录"
-          echo "检查 build 目录内容:"
-          Get-ChildItem -Path "build" -Recurse | Select-Object -First 30 FullName
+          
+          # 查找 Flutter 项目目录
+          $flutterDir = "build\flutter"
+          if (Test-Path -Path $flutterDir) {
+            echo "找到 Flutter 项目目录: $flutterDir"
+            
+            # 在 Flutter 目录中运行 clean（如果存在 pubspec.yaml）
+            $pubspecPath = "$flutterDir\pubspec.yaml"
+            if (Test-Path -Path $pubspecPath) {
+              echo "在 Flutter 项目目录中运行清理..."
+              Push-Location $flutterDir
+              flutter clean
+              Pop-Location
+            }
+          }
+        } else {
+          echo "❌ 未找到 build\windows 目录"
+          echo "当前目录内容:"
+          Get-ChildItem -Path . -Force
           exit 1
         }
 
-    - name: Upload Windows Artifact
+    - name: 上传构建产物
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: windows-app
+        name: windows-build
         path: |
-          build/windows/runner/Release/*.exe
-          build/windows/runner/Release/*.dll
+          build/windows/**
+          !build/windows/**/*.o
+          !build/windows/**/*.obj
         if-no-files-found: error
         retention-days: 7
 
-    - name: 创建 ZIP 包
+    - name: 创建可分发包
       if: success()
       run: |
-        # 创建包含所有依赖的完整 ZIP 包
-        Compress-Archive -Path "build\windows\runner\Release\*" -DestinationPath "build\windows_app.zip" -Force
-        echo "ZIP 包大小:"
-        (Get-Item "build\windows_app.zip").Length
+        echo "=== 打包构建产物 ==="
+        
+        # 查找主要的 EXE 文件
+        $exeFiles = Get-ChildItem -Path "build\windows" -Filter "*.exe" -Recurse -File
+        if ($exeFiles.Count -eq 0) {
+          echo "警告: 未找到 EXE 文件，尝试其他位置..."
+          # 尝试在 runner 目录中查找
+          $exeFiles = Get-ChildItem -Path "build\windows\runner\Release" -Filter "*.exe" -File -ErrorAction SilentlyContinue
+        }
+        
+        if ($exeFiles.Count -gt 0) {
+          $mainExe = $exeFiles[0]
+          echo "主程序: $($mainExe.FullName)"
+          
+          # 创建包含所有文件的 ZIP
+          $exeDir = $mainExe.DirectoryName
+          $zipPath = "build\windows_app.zip"
+          
+          echo "创建 ZIP 包从: $exeDir"
+          Compress-Archive -Path "$exeDir\*" -DestinationPath $zipPath -Force
+          
+          echo "ZIP 包大小: $((Get-Item $zipPath).Length / 1MB) MB"
+        } else {
+          echo "错误: 找不到可执行的 EXE 文件"
+          echo "build 目录结构:"
+          Get-ChildItem -Path "build" -Recurse | Select-Object FullName
+        }
 
-    - name: Upload ZIP Artifact
-      if: success()
+    - name: 上传 ZIP 包
+      if: success() && contains(vars.CI, 'true')
       uses: actions/upload-artifact@v4
       with:
-        name: windows-app-zip
+        name: windows-app-portable
         path: build/windows_app.zip
         retention-days: 7
