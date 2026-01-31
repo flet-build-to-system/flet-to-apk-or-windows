@@ -31,14 +31,15 @@ jobs:
           flutter config --enable-windows-desktop
 
       - name: Build Windows App
+        env:
+          PYTHONUTF8: 1
         run: |
-          # لاحظ حذف --name إذا كان يسبب مشكلة، Flet سيأخذ اسم المجلد تلقائياً
-          # أو استخدم الصيغة الصحيحة لبناء الويندوز
+          # تأكد أنك في المجلد الصحيح الذي يحتوي على main.py
           flet build windows
 
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Windows-Executable
-          # المسار الصحيح للمخرجات بعد بناء Flutter
+          name: Flet-Windows-App
+          # المسار الناتج لعملية بناء Flutter على ويندوز
           path: build/windows/x64/runner/Release/
