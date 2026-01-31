@@ -14,19 +14,17 @@ jobs:
       - name: Install Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.10'
 
       - name: Install Flutter SDK
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          architecture: x64
 
-      - name: Install Flet and Dependencies
+      - name: Install Flet
         run: |
           python -m pip install --upgrade pip
           pip install flet
-          # إذا كان لديك مكتبات أخرى، أضفها هنا أو استخدم pip install -r requirements.txt
 
       - name: Enable Windows Desktop Support
         run: |
@@ -34,12 +32,13 @@ jobs:
 
       - name: Build Windows App
         run: |
-          # سيقوم هذا الأمر بإنشاء مشروع Flutter مؤقت وبناء الـ Release
-          flet build windows --name "MyGreatApp"
+          # لاحظ حذف --name إذا كان يسبب مشكلة، Flet سيأخذ اسم المجلد تلقائياً
+          # أو استخدم الصيغة الصحيحة لبناء الويندوز
+          flet build windows
 
-      - name: Upload Build
+      - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Flet-Flutter-Windows
-          # المسار الافتراضي للمخرجات في flet build
-          path: build/windows
+          name: Windows-Executable
+          # المسار الصحيح للمخرجات بعد بناء Flutter
+          path: build/windows/x64/runner/Release/
