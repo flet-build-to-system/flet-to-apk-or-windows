@@ -9,9 +9,10 @@ jobs:
   build-windows:
     runs-on: windows-latest
     
-    # الحل السحري هنا: إجبار بايثون والويندوز على استخدام UTF-8
     env:
       PYTHONUTF8: 1
+      # تحديث الإصدار ليتوافق مع متطلبات Flet الجديدة
+      FLUTTER_VERSION: '3.38.7' 
 
     steps:
     - name: Checkout code
@@ -25,8 +26,9 @@ jobs:
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: '3.24.0'
-    
+        flutter-version: ${{ env.FLUTTER_VERSION }}
+        channel: 'stable'
+
     - name: Enable Windows Desktop
       run: flutter config --enable-windows-desktop
 
@@ -38,10 +40,10 @@ jobs:
 
     - name: Flet Build Windows
       run: |
-        # أحياناً نحتاج لتغيير ترميز الصفحة في الويندوز أيضاً قبل البدء
         chcp 65001
+        # إضافة --no-interaction أو التأكد من تحديث النسخة يمنع توقف البناء
         flet build windows --verbose
-
+      
     - name: Upload Windows Artifact
       uses: actions/upload-artifact@v4
       with:
