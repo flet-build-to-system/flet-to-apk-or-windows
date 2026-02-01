@@ -1,186 +1,61 @@
-name: Windows Build
+name: Windows Build 
 
 on:
   push:
-    branches: [ master, main ]
-  pull_request:
-    branches: [ master, main ]
+    branches: 
+      - main
   workflow_dispatch:
 
 env:
   BUILD_NUMBER: 1
   BUILD_VERSION: 1.0.0
-  PYTHON_VERSION: '3.12.4'
-  FLUTTER_VERSION: '3.38.7'
+  PYTHON_VERSION: 3.12.4
+  FLUTTER_VERSION: 3.38.7
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
-    permissions:
-      contents: read
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
     - name: Setup Python ${{ env.PYTHON_VERSION }}
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ env.PYTHON_VERSION }}
-        cache: 'pip'
-        cache-dependency-path: '**/requirements.txt'
 
     - name: Install Python Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install wheel
         pip install -r requirements.txt
-        # 安装 Flet 0.80.4 避免已知问题
-        pip install flet==0.80.4
 
     - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
       uses: subosito/flutter-action@v2
       with:
         flutter-version: ${{ env.FLUTTER_VERSION }}
-        flutter-args: "--no-version-check"
-        analytics: false
-
-    - name: 验证 Flutter 环境
-      run: |
-        echo "Flutter 版本:"
-        flutter --version
-        echo "Dart 版本:"
-        dart --version
-        echo "Flutter 医生检查:"
-        flutter doctor
-
-    - name: 清理之前的构建
-      run: |
-        # 清理之前的构建目录
-        if (Test-Path "build") {
-          echo "清理旧的构建目录..."
-          Remove-Item -Recurse -Force build
-        }
-        # 清理 Python 缓存
-        if (Test-Path "__pycache__") {
-          Remove-Item -Recurse -Force __pycache__
-        }
-        if (Test-Path "*.pyc") {
-          Remove-Item -Force *.pyc
-        }
 
     - name: Flet Build Windows
-      env:
-        PYTHONIOENCODING: UTF-8
-        PYTHONUTF8: 1
-        FLET_CLI_NON_INTERACTIVE: "true"
-        FLET_CLI_NO_ANIMATIONS: "true"
-        CI: "true"
       run: |
-        # 设置控制台编码
-        chcp 65001
-        
-        # 配置 Flutter 避免交互
-        flutter config --no-analytics --no-cli-animations --suppress-analytics
-        
-        echo "=== 开始 Windows 构建 ==="
-        echo "工作目录: $(Get-Location)"
-        echo "Python 版本:"
-        python --version
-        echo "Flet 版本:"
-        pip show flet | Select-String "Version"
-        
-        # 执行构建命令
-        flet build windows --build-number=$env:BUILD_NUMBER --build-version=$env:BUILD_VERSION --verbose
-        
-        # 检查构建结果
-        echo "=== 检查构建输出 ==="
-        
-        # 方法1：检查标准的 Windows 构建目录
-        $winBuildDir = "build\windows"
-        if (Test-Path -Path $winBuildDir) {
-          echo "✅ 找到 Windows 构建目录: $winBuildDir"
-          
-          # 查找可能的输出文件
-          $exeFiles = Get-ChildItem -Path $winBuildDir -Filter "*.exe" -Recurse -File
-          if ($exeFiles.Count -gt 0) {
-            echo "✅ 找到 $($exeFiles.Count) 个 EXE 文件"
-            $exeFiles | ForEach-Object {
-              echo "  - $($_.FullName.Substring($pwd.Path.Length + 1))"
-            }
-          } else {
-            echo "⚠️  未找到 EXE 文件，检查其他文件..."
-            Get-ChildItem -Path $winBuildDir -Recurse -Directory | Select-Object -First 5 FullName
-          }
-          
-          # 查找 Flutter 项目目录
-          $flutterDir = "build\flutter"
-          if (Test-Path -Path $flutterDir) {
-            echo "找到 Flutter 项目目录: $flutterDir"
-            
-            # 在 Flutter 目录中运行 clean（如果存在 pubspec.yaml）
-            $pubspecPath = "$flutterDir\pubspec.yaml"
-            if (Test-Path -Path $pubspecPath) {
-              echo "在 Flutter 项目目录中运行清理..."
-              Push-Location $flutterDir
-              flutter clean
-              Pop-Location
-            }
-          }
-        } else {
-          echo "❌ 未找到 build\windows 目录"
-          echo "当前目录内容:"
-          Get-ChildItem -Path . -Force
-          exit 1
-        }
+        flutter config --no-analytics
+        flet build windows --verbose --no-rich-output --build-number=$env:BUILD_NUMBER --build-version=$env:BUILD_VERSION
 
-    - name: 上传构建产物
-      if: success()
-      uses: actions/upload-artifact@v4
+    - name: Upload Windows Artifact
+      uses: actions/upload-artifact@v4.3.4
       with:
-        name: windows-build
-        path: |
-          build/windows/**
-          !build/windows/**/*.o
-          !build/windows/**/*.obj
+        name: windows-build-artifact
+        path: build/windows
         if-no-files-found: error
-        retention-days: 7
+        overwrite: false
 
-    - name: 创建可分发包
-      if: success()
-      run: |
-        echo "=== 打包构建产物 ==="
-        
-        # 查找主要的 EXE 文件
-        $exeFiles = Get-ChildItem -Path "build\windows" -Filter "*.exe" -Recurse -File
-        if ($exeFiles.Count -eq 0) {
-          echo "警告: 未找到 EXE 文件，尝试其他位置..."
-          # 尝试在 runner 目录中查找
-          $exeFiles = Get-ChildItem -Path "build\windows\runner\Release" -Filter "*.exe" -File -ErrorAction SilentlyContinue
-        }
-        
-        if ($exeFiles.Count -gt 0) {
-          $mainExe = $exeFiles[0]
-          echo "主程序: $($mainExe.FullName)"
-          
-          # 创建包含所有文件的 ZIP
-          $exeDir = $mainExe.DirectoryName
-          $zipPath = "build\windows_app.zip"
-          
-          echo "创建 ZIP 包从: $exeDir"
-          Compress-Archive -Path "$exeDir\*" -DestinationPath $zipPath -Force
-          
-          echo "ZIP 包大小: $((Get-Item $zipPath).Length / 1MB) MB"
-        } else {
-          echo "错误: 找不到可执行的 EXE 文件"
-          echo "build 目录结构:"
-          Get-ChildItem -Path "build" -Recurse | Select-Object FullName
-        }
-
-    - name: 上传 ZIP 包
-      if: success() && contains(vars.CI, 'true')
-      uses: actions/upload-artifact@v4
-      with:
-        name: windows-app-portable
-        path: build/windows_app.zip
-        retention-days: 7
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Release
+        uses: jasondavis303/tag-and-release-and-upload@v1.2.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version: v${{ env.BUILD_VERSION }}
+          assets: '[ "windows-build-artifact" ]'
+          overwrite: false
